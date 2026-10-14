@@ -373,7 +373,7 @@ python -m pytest tests/validation/sampling_params tests/validation/m10 -q   # 64
 - [ ] **简短使用说明**：DoD `#L40`/`#L747` 要求代码、单测、负向测试和文档同时提交。
 - [ ] **Reviewer 批准**：T02 的 reviewer 是 **T09**，尚未评审。
 - [ ] **WS2 延续**：逐 rank canonical sampling record 完整/一致校验（`#L22`/`#L218`；WS1 完成后同一 Owner 自动延续，非可选）。
-- [ ] **PR**：本轮只 push 分支、**不开 PR**；PR base（`test` 还是 `main`）待确认。
+- [ ] **PR**：本轮只 push 分支、**不开 PR**；分支已推到 fork `Endeavor-19/RL-Kernel`（origin 无写权限，见 §11.4）；PR base（`test` 还是 `main`）待确认。
 
 ### 11.3 待确认 / 阻塞（[待 T01]）
 
@@ -385,6 +385,16 @@ python -m pytest tests/validation/sampling_params tests/validation/m10 -q   # 64
 
 ### 11.4 环境已知问题（非代码缺陷）
 
+- **网络**：本机 `github.com` 直连不稳定（`curl` 超时、`git ls-remote` 间歇失败），git/gh 操作前需
+  `source /etc/network_turbo`（AutoDL 学术加速，代理 `http://10.0.0.11:12798`，仅加速
+  github/huggingface，不承诺稳定）。`api.github.com` 通常可直连。
+- **写权限**：`Endeavor-19` 对该仓库只有只读权限（token scopes 含 `repo`，但
+  `permissions = {push: false, pull: true}`），直接 push `origin` 返回 403。分支已推到 fork
+  `Endeavor-19/RL-Kernel`；本地 `fork` remote 指向该 fork，分支 upstream 已修正。
+  拿到写权限后可迁回 `origin`（PR base 仍待确认）。
+- **凭据**：本机 gh 为 **2.4.0**，**没有 `gh auth token` 子命令**（误用会得到 usage 文本而非 token）；
+  token 改从 `~/.config/gh/hosts.yml` 读取，并以一次性 `credential.helper` 注入——
+  未写入 remote URL、未落盘、未改 git config。
 - 本机扩展以 `KERNEL_ALIGN_FORCE_SM90=1` 编译，**未开** `KERNEL_ALIGN_DET_GEMM_SM90=1`，导致
   `tests/validation/operators/test_ws1_candidate_evidence.py` 有 1 项失败（`refusing naive fallback`）；
   补上该 flag 重编即可消除。

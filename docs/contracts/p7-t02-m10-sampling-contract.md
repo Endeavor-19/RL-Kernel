@@ -342,3 +342,51 @@ stub 阶段就要把 case ID 生成规则定死，否则 WS2/Integration 无法�
 
 **共同 DoD**（`#L739-L750`）：configured 不冒充 actual readback；schema/hash/artifact 带版本；
 复用指定基础设施；Owner 提供可执行命令 + 结果摘要；Reviewer（T09）批准。
+
+---
+
+## 11. 当前状态与待确认 / 阻塞项
+
+> 快照：2026-10-14。分支 `feat/p7-t02-sampling-m10-contract`（基于 `origin/main @ 4406afc`）。
+
+### 11.1 已完成（附证据）
+
+| 交付项 | 位置 | 证据 |
+| --- | --- | --- |
+| canonical sampling record（四层 + 版本化 fingerprint） | `rl_engine/validation/sampling_params/schema.py` | `tests/validation/sampling_params/test_sampling_gate.py` |
+| 参数正规化 + fail-closed gate | `rl_engine/validation/sampling_params/gate.py` | 同上（缺层 / fallback / 非 identity 负向） |
+| M10 输入 schema + 前置校验链 | `rl_engine/validation/m10/{schema,precheck}.py` | `tests/validation/m10/test_m10_precheck.py` |
+| synthetic fixture + stub provider（冻结 read ABI） | `rl_engine/validation/m10/stub.py` | 同上 |
+| M10 计算片（复用 strict `linear_logp` + raw bytes + provenance） | `rl_engine/validation/m10/score.py` | `tests/validation/m10/test_m10_score.py`（4 项 SM90-gated 真跑） |
+| H20/SM90 预验证证据 | 见 §2.1 | `pytest tests/ops/logprob/test_linear_logp.py -k sm90` → 24 passed |
+
+```bash
+python -m pytest tests/validation/sampling_params tests/validation/m10 -q   # 64 passed
+```
+
+回归：`pytest tests/validation tests/ops/logprob -q` → **687 passed / 3 failed / 20 skipped**。
+3 个失败均与本任务代码无关：2 个是全量跑时 5s scoring 超时的 flaky（单跑即过），
+1 个是扩展编译缺 `KERNEL_ALIGN_DET_GEMM_SM90=1`（见 §11.4）。
+
+### 11.2 未完成（按共同 DoD `#L739-L750`）
+
+- [ ] **简短使用说明**：DoD `#L40`/`#L747` 要求代码、单测、负向测试和文档同时提交。
+- [ ] **Reviewer 批准**：T02 的 reviewer 是 **T09**，尚未评审。
+- [ ] **WS2 延续**：逐 rank canonical sampling record 完整/一致校验（`#L22`/`#L218`；WS1 完成后同一 Owner 自动延续，非可选）。
+- [ ] **PR**：本轮只 push 分支、**不开 PR**；PR base（`test` 还是 `main`）待确认。
+
+### 11.3 待确认 / 阻塞（[待 T01]）
+
+详见 §9，另：
+
+- [ ] **正式 bit-equivalence 判定**必须用 T01 的 P1 fixed-K/batch-invariant GEMM arithmetic spec + bit harness（`#L173`/`#L700`）；本任务只做了 §2.1 的预验证，归属已在 §2.1 标注。
+- [ ] **boundary 声明字段**（`boundary_phase/sublayer_site/event_index/branch_id/predecessor_event_ids`、`comparison_mode`、`producer_verdict`、`fixture_checksum`）由 T01 的 boundary-contract manifest 提供，T02 只消费。
+- [ ] **identity/discrete profile gate** 是第一条决策步，归 **T03**，不在 T02 范围。
+
+### 11.4 环境已知问题（非代码缺陷）
+
+- 本机扩展以 `KERNEL_ALIGN_FORCE_SM90=1` 编译，**未开** `KERNEL_ALIGN_DET_GEMM_SM90=1`，导致
+  `tests/validation/operators/test_ws1_candidate_evidence.py` 有 1 项失败（`refusing naive fallback`）；
+  补上该 flag 重编即可消除。
+- `pip install -e .` 会连带改动 `torch_env` 依赖（transformers/typing-extensions 等）；仅需扩展时用 `--no-deps`。
+- 本机单卡：TP 多 rank 实跑不可用，WS2 需多卡环境。

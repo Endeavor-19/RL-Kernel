@@ -370,7 +370,7 @@ python -m pytest tests/validation/sampling_params tests/validation/m10 -q   # 64
 
 ### 11.2 未完成（按共同 DoD `#L739-L750`）
 
-- [ ] **简短使用说明**：DoD `#L40`/`#L747` 要求代码、单测、负向测试和文档同时提交。
+- [x] **简短使用说明**：见 §12（环境准备 / 最小示例 / 测试命令 / fail-closed 状态对照），示例已实测通过。
 - [ ] **Reviewer 批准**：T02 的 reviewer 是 **T09**，尚未评审。
 - [ ] **WS2 延续**：逐 rank canonical sampling record 完整/一致校验（`#L22`/`#L218`；WS1 完成后同一 Owner 自动延续，非可选）。
 - [ ] **PR**：本轮只 push 分支、**不开 PR**；分支已推到 fork `Endeavor-19/RL-Kernel`（origin 无写权限，见 §11.4）；PR base（`test` 还是 `main`）待确认。
@@ -400,3 +400,78 @@ python -m pytest tests/validation/sampling_params tests/validation/m10 -q   # 64
   补上该 flag 重编即可消除。
 - `pip install -e .` 会连带改动 `torch_env` 依赖（transformers/typing-extensions 等）；仅需扩展时用 `--no-deps`。
 - 本机单卡：TP 多 rank 实跑不可用，WS2 需多卡环境。
+
+---
+
+## 12. 使用说明（Quickstart）
+
+### 12.1 环境准备
+
+```bash
+# SM90 机器上编译一次 native 扩展（含 strict linear_logp）
+export CUDA_HOME=/usr/local/cuda-12.8
+export PATH=$CUDA_HOME/bin:$PATH
+export KERNEL_ALIGN_FORCE_SM90=1
+export MAX_JOBS=16
+python -m pip install -e . --no-build-isolation
+
+# 本机（AutoDL）访问 github.com 前需要
+source /etc/network_turbo
+```
+
+### 12.2 最小可跑示例
+
+```python
+import torch
+
+from rl_engine.validation.m10 import build_m10_stub, evaluate_m10_precheck, score_m10, M10Status
+from rl_engine.validation.sampling_params import (
+    CanonicalSamplingRecord,
+    SamplingGateStatus,
+    evaluate_sampling_gate,
+    normalize_sampling_layer,
+)
+
+# 1) sampling 参数规范化 + gate（纯 CPU，无 GPU 依赖）
+layer = normalize_sampling_layer(temperature=1.0, top_k=0, top_p=None, min_p=0.0)
+record = CanonicalSamplingRecord(
+    case_id="case-0", engine="stub",
+    requested=layer, normalized=layer, materialized=layer, runtime_actual=layer,
+)
+assert evaluate_sampling_gate(record).status is SamplingGateStatus.PASS
+
+# 2) M10 前置校验（纯 CPU）
+inp = build_m10_stub(tokens=8, hidden=64, local_vocab=128)
+assert evaluate_m10_precheck(inp).status is M10Status.PASS
+
+# 3) M10 打分（复用 strict linear_logp，需要 SM90 扩展 + CUDA）
+score = score_m10(inp, device=torch.device("cuda"))
+assert score.passed
+raw = score.selected_logprob_bytes   # active token 的 FP32 raw bytes，交给 T09 做 strict verdict
+provenance = dict(score.provenance)  # actual backend / 冻结合同 / sampling fingerprint
+```
+
+**stub → 真实 provider 的替换**：`StubM10Provider` 已冻结 `read(case_id) -> M10Input` 的 ABI；
+T05/T06 就位后换实现即可，case id / schema / runner / 验收命令不变（`#L641-L643`）。
+
+### 12.3 测试
+
+```bash
+python -m pytest tests/validation/sampling_params tests/validation/m10 -q      # 64 passed
+python -m pytest tests/ops/logprob/test_linear_logp.py -k sm90 -v               # 24 passed (H20/SM90)
+```
+
+### 12.4 fail-closed 返回状态对照
+
+| 场景 | 状态 |
+| --- | --- |
+| 任一层缺失 / 无法回读 | `MISSING_PROVENANCE` |
+| 命中 fallback / 未声明 backend | `SILENT_FALLBACK` |
+| `temperature != 1.0`、`top_k`/`top_p`/`min_p` 非 identity、四层漂移 | `SAMPLING_PARAMS_MISMATCH` |
+| LM Head LoRA | `UNSUPPORTED_CAPABILITY` |
+| 形状/dtype/vocab ownership/padded target 不合法 | `INVALID_PROFILE` |
+| pre-update weight lock 漂移 | `PRE_UPDATE_WEIGHT_DRIFT` |
+| 无 active token | `ZERO_ACTIVE_TOKENS` |
+| 非有限值 | `NON_FINITE` |
+
+失败时 `selected_logprob_bytes` 为空、不启动 kernel（fail-closed 先于计算）。

@@ -51,6 +51,32 @@ sampling 设置、实际语义漂移、LM Head LoRA 或未声明 backend 都必�
 
 **基线结论：** 只需 T01 start kit 即可开工（`#L601`）。T05/T06 的真 readback 在 WS1 不阻塞。
 
+### 2.1 H20/SM90 预验证证据（非正式 gate 证据）
+
+本机为 `NVIDIA H20`（compute capability **9,0** = sm_90），CUDA toolkit 12.8 位于 `/usr/local/cuda-12.8`。
+以 `KERNEL_ALIGN_FORCE_SM90=1` 编译 native 扩展后（`_EXT_AVAILABLE=True`，`fused_linear_logp_sm90` /
+`_backward` / `_global_target` / `ordered_logp_merge` 符号齐备），现有 SM90 用例全部真实执行并通过：
+
+```bash
+export CUDA_HOME=/usr/local/cuda-12.8
+export PATH=$CUDA_HOME/bin:$PATH
+export KERNEL_ALIGN_FORCE_SM90=1
+export MAX_JOBS=16
+python -m pip install -e . --no-build-isolation
+python -m pytest tests/ops/logprob/test_linear_logp.py -k sm90 -v
+# 24 passed, 29 deselected
+```
+
+覆盖：`test_sm90_forward_matches_native_bf16`、`test_sm90_strict_contract_is_bitwise_batch_invariant`、
+`test_sm90_strict_contract_logits_return_and_padding_do_not_change_logp_bits`、
+`test_sm90_strict_contract_backward_matches_logp_and_lse_reference`、
+`test_sm90_rejects_out_of_range_target`、`test_sm90_falls_back_for_unsupported_inputs` 等正负路径。
+
+**归属说明：** 这是 T01 bit-harness 到位前的**预验证**，用于提前暴露 actual kernel 问题；
+WS1 Gate 要求的正式 bit-equivalence 判定仍以 T01 冻结的 P1 arithmetic spec + harness 为准（`#L173`、`#L700`）。
+**注意**：M10 的 byte-exact 合同对象是 train 侧与 rollout 侧**同 kernel 同输入**的输出，
+不是 kernel vs PyTorch golden（reduction 类 kernel 与 golden 的归约顺序不同，forward 本就无法 bitwise 相等）。
+
 ---
 
 ## 3. Canonical Sampling Record

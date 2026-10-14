@@ -90,7 +90,7 @@ SamplingLayer:
 | 参数 | canonical 值 | 允许的框架原始表达（先规范化再比较） |
 | --- | --- | --- |
 | `temperature` | `1.0` | 恰好 `1.0`；其它值 → mismatch |
-| `top_k` | `DISABLED` | `None` / `0` / `-1` / `>= vocab` → `DISABLED` |
+| `top_k` | `DISABLED` | `None` / `0` / `-1` → `DISABLED`（规范化阶段无 vocab 上下文，不做 `>= vocab` 判定） |
 | `top_p` | `IDENTITY` | `None` / `1.0` → `IDENTITY` |
 | `min_p` | `DISABLED` | `None` / `0.0` → `DISABLED` |
 
@@ -114,6 +114,10 @@ SamplingLayer:
 
 **关键约束：** `configured value` 不得冒充 `actual readback`（DoD `#L743`）。`runtime_actual`
 必须来自执行侧回读，不能直接复用 `materialized`。
+
+**实现诊断优先级**（fail-closed）：缺层 → `MISSING_PROVENANCE`；命中 fallback → `SILENT_FALLBACK`；
+逐层 identity 不符（含 requested vs runtime_actual 漂移）→ `SAMPLING_PARAMS_MISMATCH`。
+漂移不需要单独一条路径——任一层非 identity 即被逐层检查捕获，`failing_layer` 指出最早出问题的层。
 
 ---
 
